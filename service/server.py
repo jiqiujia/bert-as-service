@@ -120,10 +120,6 @@ class BertServer(threading.Thread):
             else:
                 self.backend.send_multipart([client, b'', msg])
 
-        self.frontend.close()
-        self.backend.close()
-        self.context.term()
-
 
 class BertSink(threading.Thread):
     def __init__(self, args, client_chk):
@@ -131,6 +127,7 @@ class BertSink(threading.Thread):
         self.port = args.port_out
         self.context = None
         self.receiver = None
+        self.sender = None
         self.exit_flag = threading.Event()
         self.logger = set_logger('SINK')
         self.address = None
@@ -139,6 +136,9 @@ class BertSink(threading.Thread):
     def close(self):
         self.logger.info('shutting down...')
         self.exit_flag.set()
+        self.receiver.close()
+        self.sender.close()
+        self.context.term()
         self.logger.info('terminated!')
 
     def run(self):
@@ -181,9 +181,6 @@ class BertSink(threading.Thread):
                 pending_client.pop(client)
                 pending_checksum.pop(client)
                 self.client_checksum.pop(client)
-
-        self.receiver.close()
-        self.context.term()
 
 
 class BertWorker(Process):
