@@ -3,7 +3,6 @@
 # Han Xiao <artex.xh@gmail.com> <https://hanxiao.github.io>
 import multiprocessing
 import os
-import pickle
 import sys
 import threading
 import time
@@ -104,7 +103,7 @@ class BertServer(threading.Thread):
                                        'ipc_sink': sink_thread.address}, **self.args_dict})])
                 continue
 
-            seqs = pickle.loads(msg)
+            seqs = jsonapi.loads(msg)
             num_seqs = len(seqs)
             self.client_checksum[client] = num_seqs
 
@@ -116,7 +115,7 @@ class BertServer(threading.Thread):
                     if tmp:
                         # get the worker with minimum workload
                         client_partial_id = client + b'@%d' % s_idx
-                        self.backend.send_multipart([client_partial_id, b'', pickle.dumps(tmp, protocol=-1)])
+                        self.backend.send_multipart([client_partial_id, b'', jsonapi.dumps(tmp, protocol=-1)])
                     s_idx += len(tmp)
             else:
                 self.backend.send_multipart([client, b'', msg])
@@ -155,7 +154,7 @@ class BertSink(threading.Thread):
             msg = self.receiver.recv_multipart()
             client_id = msg[0]
             # parsing the ndarray
-            arr_info, arr_val = jsonapi.loads(msg[1]), msg[2]
+            arr_info, arr_val = jsonapi.loads(msg[2]), msg[4]
             X = np.frombuffer(memoryview(arr_val), dtype=arr_info['dtype'])
             X = X.reshape(arr_info['shape'])
             client_info = client_id.split(b'@')
@@ -242,7 +241,7 @@ class BertWorker(Process):
         def gen():
             while not self.exit_flag.is_set():
                 client_id, empty, msg = worker.recv_multipart()
-                msg = pickle.loads(msg)
+                msg = jsonapi.loads(msg)
                 self.logger.info('received %4d from %s' % (len(msg), client_id))
                 if BertClient.is_valid_input(msg):
                     tmp_f = list(convert_lst_to_features(msg, self.max_seq_len, self.tokenizer))
@@ -255,6 +254,7 @@ class BertWorker(Process):
                 else:
                     self.logger.warning('received unsupported type from %s! sending back None' % client_id)
                     worker.send_multipart([client_id, b'', b''])
+            worker.close()
 
         def input_fn():
             return (tf.data.Dataset.from_generator(
@@ -275,5 +275,5 @@ class BertWorker(Process):
 def send_ndarray(src, dest, X, flags=0, copy=True, track=False):
     """send a numpy array with metadata"""
     md = dict(dtype=str(X.dtype), shape=X.shape)
-    return src.send_multipart([dest, jsonapi.dumps(md), X],
+    return src.send_multipart([dest, b'', jsonapi.dumps(md), b'', X],
                               flags, copy=copy, track=track)

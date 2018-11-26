@@ -51,7 +51,7 @@ class BertClient:
     def encode(self, texts):
         texts = _unicode(texts)
         if self.is_valid_input(texts):
-            self.socket.send_pyobj(texts)
+            self.socket.send_json(texts)
             response = self.socket.recv_multipart()
             arr_info, arr_val = jsonapi.loads(response[0]), response[2]
             X = np.frombuffer(_buffer(arr_val), dtype=arr_info['dtype'])
