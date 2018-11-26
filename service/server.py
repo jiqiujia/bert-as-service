@@ -155,7 +155,7 @@ class BertSink(threading.Thread):
             msg = self.receiver.recv_multipart()
             client_id = msg[0]
             # parsing the ndarray
-            arr_info, arr_val = jsonapi.loads(msg[2]), msg[4]
+            arr_info, arr_val = jsonapi.loads(msg[1]), msg[2]
             X = np.frombuffer(memoryview(arr_val), dtype=arr_info['dtype'])
             X = X.reshape(arr_info['shape'])
             client_info = client_id.split(b'@')
@@ -255,7 +255,6 @@ class BertWorker(Process):
                 else:
                     self.logger.warning('received unsupported type from %s! sending back None' % client_id)
                     worker.send_multipart([client_id, b'', b''])
-            worker.close()
 
         def input_fn():
             return (tf.data.Dataset.from_generator(
@@ -276,5 +275,5 @@ class BertWorker(Process):
 def send_ndarray(src, dest, X, flags=0, copy=True, track=False):
     """send a numpy array with metadata"""
     md = dict(dtype=str(X.dtype), shape=X.shape)
-    return src.send_multipart([dest, b'', jsonapi.dumps(md), b'', X],
+    return src.send_multipart([dest, jsonapi.dumps(md), X],
                               flags, copy=copy, track=track)
