@@ -158,7 +158,7 @@ class BertSink(threading.Thread):
             msg = self.receiver.recv_multipart()
             client_id = msg[0]
             # parsing the ndarray
-            arr_info, arr_val = jsonapi.loads(msg[2]), msg[4]
+            arr_info, arr_val = jsonapi.loads(msg[1]), msg[2]
             X = np.frombuffer(memoryview(arr_val), dtype=arr_info['dtype'])
             X = X.reshape(arr_info['shape'])
             client_info = client_id.split(b'@')
