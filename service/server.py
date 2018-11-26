@@ -63,7 +63,7 @@ class BertServer(threading.Thread):
 
     def run(self):
         self.context = zmq.Context()
-        self.frontend = self.context.socket(zmq.ROUTER)
+        self.frontend = self.context.socket(zmq.PULL)
         self.frontend.bind('tcp://*:%d' % self.port)
         # self.frontend.setsockopt(zmq.ROUTER_MANDATORY, 1)
 
@@ -93,15 +93,15 @@ class BertServer(threading.Thread):
             process.start()
 
         while not self.exit_flag.is_set():
-            client, _, msg = self.frontend.recv_multipart()
-            if msg == b'SHOW_CONFIG':
-                self.frontend.send_multipart(
-                    [client, b'',
-                     jsonapi.dumps({**{'client': client.decode('ascii'),
-                                       'num_process': len(self.processes),
-                                       'ipc_backend': backend_addr,
-                                       'ipc_sink': sink_thread.address}, **self.args_dict})])
-                continue
+            client, msg = self.frontend.recv_multipart()
+            # if msg == b'SHOW_CONFIG':
+            #     self.frontend.send_multipart(
+            #         [client, b'',
+            #          jsonapi.dumps({**{'client': client.decode('ascii'),
+            #                            'num_process': len(self.processes),
+            #                            'ipc_backend': backend_addr,
+            #                            'ipc_sink': sink_thread.address}, **self.args_dict})])
+            #     continue
 
             seqs = jsonapi.loads(msg)
             num_seqs = len(seqs)
@@ -126,12 +126,11 @@ class BertServer(threading.Thread):
 
 
 class BertSink(threading.Thread):
-    def __init__(self, args, frontend, client_chk):
+    def __init__(self, args, client_chk):
         super().__init__()
-        self.port = args.port
+        self.port = args.port_out
         self.context = None
         self.receiver = None
-        self.frontend = frontend
         self.exit_flag = threading.Event()
         self.logger = set_logger('SINK')
         self.address = None
@@ -147,6 +146,11 @@ class BertSink(threading.Thread):
         self.receiver = self.context.socket(zmq.PULL)
         self.receiver.bind('ipc://*')
         self.address = self.receiver.getsockopt(zmq.LAST_ENDPOINT).decode('ascii')
+
+        # publish to client
+        self.sender = self.context.socket(zmq.PUB)
+        self.sender.bind('tcp://*:%d' % self.port)
+
         pending_checksum = defaultdict(int)
         pending_client = defaultdict(list)
 
@@ -173,7 +177,7 @@ class BertSink(threading.Thread):
                     'client %s %d samples are done! sending back to client' % (client, self.client_checksum[client]))
                 # re-sort to the original order
                 tmp = [x[0] for x in sorted(tmp, key=lambda x: x[1])]
-                send_ndarray(self.frontend, client, np.concatenate(tmp, axis=0))
+                send_ndarray(self.sender, client, np.concatenate(tmp, axis=0))
                 pending_client.pop(client)
                 pending_checksum.pop(client)
                 self.client_checksum.pop(client)
@@ -275,5 +279,4 @@ class BertWorker(Process):
 def send_ndarray(src, dest, X, flags=0, copy=True, track=False):
     """send a numpy array with metadata"""
     md = dict(dtype=str(X.dtype), shape=X.shape)
-    return src.send_multipart([dest, b'', jsonapi.dumps(md), b'', X],
-                              flags, copy=copy, track=track)
+    return src.send_multipart([dest, jsonapi.dumps(md), X], flags, copy=copy, track=track)
