@@ -72,7 +72,7 @@ class BertServer(threading.Thread):
         backend_addr = self.backend.getsockopt(zmq.LAST_ENDPOINT).decode('ascii')
 
         # start the sink thread
-        sink_thread = BertSink(self.args, self.frontend, self.client_checksum)
+        sink_thread = BertSink(self.args, self.client_checksum)
         sink_thread.start()
         self.processes.append(sink_thread)
 
