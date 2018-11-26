@@ -115,7 +115,7 @@ class BertServer(threading.Thread):
                     if tmp:
                         # get the worker with minimum workload
                         client_partial_id = client + b'@%d' % s_idx
-                        self.backend.send_multipart([client_partial_id, b'', jsonapi.dumps(tmp, protocol=-1)])
+                        self.backend.send_multipart([client_partial_id, b'', jsonapi.dumps(tmp)])
                     s_idx += len(tmp)
             else:
                 self.backend.send_multipart([client, b'', msg])
