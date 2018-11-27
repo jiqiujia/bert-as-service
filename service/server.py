@@ -53,18 +53,6 @@ class BertServer(threading.Thread):
             'python_version': sys.version,
             'server_start_time': str(datetime.now())
         }
-
-    def close(self):
-        self.logger.info('shutting down...')
-        # send signal to frontend
-        tmp_context = zmq.Context()
-        tmp = tmp_context.socket(zmq.PUSH)
-        tmp.connect('tcp://localhost:%d' % self.port)
-        tmp.send_multipart([b'', ServerCommand.terminate])
-        tmp.close()
-        tmp_context.term()
-
-    def prepare(self):
         self.processes = []
         self.context = zmq.Context()
 
@@ -86,14 +74,26 @@ class BertServer(threading.Thread):
         self.backend_pub.bind('ipc://*')
         self.addr_backend_pub = self.backend_pub.getsockopt(zmq.LAST_ENDPOINT).decode('ascii')
 
-        # start the sink process
+        # start the sink thread
         proc_sink = BertSink(self.args, self.addr_front2sink)
         proc_sink.start()
         self.processes.append(proc_sink)
         self.addr_sink = self.sink.recv().decode('ascii')
 
+    def close(self):
+        self.logger.info('shutting down...')
+        # send signal to frontend
+        tmp = self.context.socket(zmq.PUSH)
+        tmp.connect('tcp://localhost:%d' % self.port)
+        tmp.send_multipart([b'', ServerCommand.terminate])
+        tmp.close()
+        self.frontend.close()
+        self.backend.close()
+        self.sink.close()
+        self.context.term()
+        self.logger.info('terminated!')
+
     def run(self):
-        self.prepare()
         available_gpus = range(self.num_worker)
         run_on_gpu = True
         num_req = 0
