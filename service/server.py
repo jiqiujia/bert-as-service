@@ -88,6 +88,7 @@ class BertServer(threading.Thread):
         tmp.connect('tcp://localhost:%d' % self.port)
         tmp.send_multipart([b'', ServerCommand.terminate])
         tmp.close()
+        self.join()
 
     def run(self):
         available_gpus = range(self.num_worker)
@@ -136,7 +137,7 @@ class BertServer(threading.Thread):
                     seqs = jsonapi.loads(msg)
                     num_seqs = len(seqs)
                     # tell sink to collect a new job
-                    self.sink.send_multipart([client, b'REGISTER', b'%d' % num_seqs])
+                    self.sink.send_multipart([client, ServerCommand.new_job, b'%d' % num_seqs])
 
                     if num_seqs > self.max_batch_size:
                         # divide the large batch into small batches
@@ -280,6 +281,7 @@ class BertWorker(Process):
 
         frontend = context.socket(zmq.SUB)
         frontend.connect(self.front_address)
+        frontend.setsockopt(zmq.SUBSCRIBE, b'')
 
         poller = zmq.Poller()
         poller.register(frontend, zmq.POLLIN)
@@ -310,6 +312,7 @@ class BertWorker(Process):
                 if socks.get(frontend) == zmq.POLLIN:
                     client_id, msg = frontend.recv_multipart()
                     if msg == ServerCommand.terminate:
+                        self.logger.info('termination initialized!')
                         raise StopIteration
                 if socks.get(receiver) == zmq.POLLIN:
                     client_id, msg = receiver.recv_multipart()
