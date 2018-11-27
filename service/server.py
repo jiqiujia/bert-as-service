@@ -88,6 +88,7 @@ class BertServer(threading.Thread):
         tmp.connect('tcp://localhost:%d' % self.port)
         tmp.send_multipart([b'', ServerCommand.terminate])
         tmp.close()
+        self.frontend.close()
         self.join()
 
     def run(self):
