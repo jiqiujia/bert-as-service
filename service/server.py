@@ -242,7 +242,6 @@ class BertSink(Process):
             frontend.close()
             sender.close()
             context.term()
-            self.terminate()
             self.logger.info('terminated!')
 
 
