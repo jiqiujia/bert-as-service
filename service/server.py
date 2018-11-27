@@ -23,6 +23,12 @@ from helper import set_logger
 from service.client import BertClient
 
 
+class ServerCommand:
+    terminate = b'TERMINATION'
+    show_config = b'SHOW_CONFIG'
+    new_job = b'REGISTER'
+
+
 class BertServer(threading.Thread):
     def __init__(self, args):
         super().__init__()
@@ -73,13 +79,14 @@ class BertServer(threading.Thread):
 
     def close(self):
         self.logger.info('shutting down...')
+        # send signal to frontend
+        tmp = self.context.socket(zmq.PUSH)
+        tmp.connect('tcp://localhost:%d' % self.port)
+        tmp.send_multipart([b'', ServerCommand.terminate])
+        tmp.close()
+        # tell all workers to close
         for p in self.processes:
             p.close()
-        self.frontend.close()
-        self.backend.close()
-        self.sink.close()
-        self.context.term()
-        self.logger.info('terminated!')
 
     def run(self):
         available_gpus = range(self.num_worker)
@@ -104,8 +111,8 @@ class BertServer(threading.Thread):
         try:
             while True:
                 client, msg = self.frontend.recv_multipart()
-                if msg == b'SHOW_CONFIG':
-                    self.sink.send_multipart([client, b'CONFIG',
+                if msg == ServerCommand.show_config:
+                    self.sink.send_multipart([client, msg,
                                               jsonapi.dumps({**{'client': client.decode('ascii'),
                                                                 'num_subprocess': len(self.processes),
                                                                 'frontend -> backend': self.addr_backend,
@@ -115,7 +122,10 @@ class BertServer(threading.Thread):
                                                                 'run_on_gpu': run_on_gpu,
                                                                 'num_request': num_req},
                                                              **self.args_dict})])
-                    continue
+                elif msg == ServerCommand.terminate:
+                    self.sink.send_multipart([client, msg, b''])
+                    self.logger.info('termination initialized!')
+                    break
 
                 num_req += 1
                 client = client + b'#' + str(uuid.uuid4()).encode('ascii')
@@ -138,6 +148,12 @@ class BertServer(threading.Thread):
                     self.backend.send_multipart([client, msg])
         except zmq.error.ContextTerminated:
             self.logger.error('context is closed!')
+        finally:
+            self.frontend.close()
+            self.backend.close()
+            self.sink.close()
+            self.context.term()
+            self.logger.info('terminated!')
 
 
 class BertSink(Process):
@@ -149,10 +165,8 @@ class BertSink(Process):
         self.front_sink_addr = front_sink_addr
 
     def close(self):
-        self.logger.info('shutting down...')
-        self.exit_flag.set()
-        self.terminate()
-        self.logger.info('terminated!')
+        # sink is closed by receiving terminate signal from frontend
+        pass
 
     def run(self):
         context = zmq.Context()
@@ -213,13 +227,23 @@ class BertSink(Process):
 
                 if socks.get(frontend) == zmq.POLLIN:
                     job_info, msg_type, msg_info = frontend.recv_multipart()
-                    if msg_type == b'REGISTER':
+                    if msg_type == ServerCommand.new_job:
                         job_checksum[job_info] = int(msg_info)
                         self.logger.info('new job %s size: %d is registered!' % (job_info, int(msg_info)))
-                    elif msg_type == b'CONFIG':
+                    elif msg_type == ServerCommand.show_config:
                         sender.send_multipart([job_info, msg_info])
+                    elif msg_type == ServerCommand.terminate:
+                        self.logger.info('termination initialized!')
+                        break
         except zmq.error.ContextTerminated:
             self.logger.error('context is closed!')
+        finally:
+            receiver.close()
+            frontend.close()
+            sender.close()
+            context.term()
+            self.terminate()
+            self.logger.info('terminated!')
 
 
 class BertWorker(Process):
@@ -241,14 +265,12 @@ class BertWorker(Process):
         )
         os.environ['CUDA_VISIBLE_DEVICES'] = str(self.worker_id)
         self.estimator = Estimator(self.model_fn)
-        self.exit_flag = multiprocessing.Event()
         self.logger = set_logger('WORKER-%d' % self.worker_id)
         self.worker_address = worker_address
         self.sink_address = sink_address
 
     def close(self):
         self.logger.info('shutting down...')
-        self.exit_flag.set()
         self.terminate()
         self.join()
 
@@ -279,7 +301,7 @@ class BertWorker(Process):
 
     def input_fn_builder(self, worker):
         def gen():
-            while not self.exit_flag.is_set():
+            while True:
                 client_id, msg = worker.recv_multipart()
                 msg = jsonapi.loads(msg)
                 self.logger.info('new job %s, size: %d' % (client_id, len(msg)))
