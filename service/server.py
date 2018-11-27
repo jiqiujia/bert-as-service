@@ -92,6 +92,9 @@ class BertServer(threading.Thread):
         self.backend_pub.close()
         self.sink.close()
         self.frontend.close()
+        for p in self.processes:
+            p.close()
+        self.join()
         self.logger.info('all terminated!')
 
     def run(self):
@@ -271,6 +274,11 @@ class BertWorker(Process):
         self.sink_address = sink_address
         self.front_address = frontend_address
 
+    def close(self):
+        self.join()
+        self.terminate()
+        self.logger.info('terminated!')
+
     def run(self):
         context = zmq.Context()
         receiver = context.socket(zmq.PULL)
@@ -303,8 +311,7 @@ class BertWorker(Process):
         sink.close()
         frontend.close()
         context.term()
-        self.terminate()
-        self.logger.info('terminated!')
+        self.logger.info('stop listening!')
 
     def input_fn_builder(self, poller, frontend, receiver):
         def gen():
