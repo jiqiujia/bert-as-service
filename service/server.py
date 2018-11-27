@@ -88,7 +88,6 @@ class BertServer(threading.Thread):
         self.backend_pub.send_multipart([b'', msg])
         # send signal to frontend
         self.context.term()
-        self.join()
         self.backend.close()
         self.backend_pub.close()
         self.sink.close()
@@ -240,6 +239,7 @@ class BertSink(Process):
             frontend.close()
             sender.close()
             context.term()
+            self.terminate()
             self.logger.info('terminated!')
 
 
@@ -299,6 +299,7 @@ class BertWorker(Process):
         sink.close()
         frontend.close()
         context.term()
+        self.terminate()
         self.logger.info('terminated!')
 
     def input_fn_builder(self, poller, frontend, receiver):
