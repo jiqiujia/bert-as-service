@@ -165,6 +165,11 @@ class BertSink(Process):
         self.logger = set_logger('SINK')
         self.front_sink_addr = front_sink_addr
 
+    def close(self):
+        self.join()
+        self.terminate()
+        self.logger.info('terminated!')
+
     def run(self):
         context = zmq.Context()
         # receive from workers
@@ -239,8 +244,7 @@ class BertSink(Process):
             frontend.close()
             sender.close()
             context.term()
-            self.terminate()
-            self.logger.info('terminated!')
+            self.logger.info('stop listening!')
 
 
 class BertWorker(Process):
