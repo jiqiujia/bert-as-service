@@ -87,14 +87,13 @@ class BertServer(threading.Thread):
         self.sink.send_multipart([b'', msg, b''])
         self.backend_pub.send_multipart([b'', msg])
         # send signal to frontend
-        self.context.term()
         self.backend.close()
         self.backend_pub.close()
         self.sink.close()
         self.frontend.close()
         for p in self.processes:
             p.close()
-        self.join()
+        self.context.term()
         self.logger.info('all terminated!')
 
     def run(self):
