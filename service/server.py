@@ -4,7 +4,6 @@
 import multiprocessing
 import os
 import sys
-import threading
 import time
 import uuid
 from collections import defaultdict
@@ -29,9 +28,8 @@ class ServerCommand:
     new_job = b'REGISTER'
 
 
-class BertServer(threading.Thread):
+class BertServer:
     def __init__(self, args):
-        super().__init__()
         self.logger = set_logger('VENTILATOR')
 
         self.model_dir = args.model_dir
@@ -89,9 +87,8 @@ class BertServer(threading.Thread):
         tmp.connect('tcp://localhost:%d' % self.port)
         tmp.send_multipart([b'', ServerCommand.terminate])
         tmp.close()
-        self.join(5)
 
-    def run(self):
+    def start(self):
         available_gpus = range(self.num_worker)
         run_on_gpu = True
         num_req = 0
