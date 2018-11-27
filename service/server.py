@@ -4,6 +4,7 @@
 import multiprocessing
 import os
 import sys
+import threading
 import time
 import uuid
 from collections import defaultdict
@@ -28,8 +29,9 @@ class ServerCommand:
     new_job = b'REGISTER'
 
 
-class BertServer:
+class BertServer(threading.Thread):
     def __init__(self, args):
+        super().__init__()
         self.logger = set_logger('VENTILATOR')
 
         self.model_dir = args.model_dir
@@ -51,6 +53,18 @@ class BertServer:
             'python_version': sys.version,
             'server_start_time': str(datetime.now())
         }
+
+    def close(self):
+        self.logger.info('shutting down...')
+        # send signal to frontend
+        tmp_context = zmq.Context()
+        tmp = tmp_context.socket(zmq.PUSH)
+        tmp.connect('tcp://localhost:%d' % self.port)
+        tmp.send_multipart([b'', ServerCommand.terminate])
+        tmp.close()
+        tmp_context.term()
+
+    def prepare(self):
         self.processes = []
         self.context = zmq.Context()
 
@@ -72,22 +86,14 @@ class BertServer:
         self.backend_pub.bind('ipc://*')
         self.addr_backend_pub = self.backend_pub.getsockopt(zmq.LAST_ENDPOINT).decode('ascii')
 
-        # start the sink thread
+        # start the sink process
         proc_sink = BertSink(self.args, self.addr_front2sink)
         proc_sink.start()
         self.processes.append(proc_sink)
         self.addr_sink = self.sink.recv().decode('ascii')
-        self.logger.info('frontend-sink ipc: %s' % self.addr_sink)
 
-    def close(self):
-        self.logger.info('shutting down...')
-        # send signal to frontend
-        tmp = self.context.socket(zmq.PUSH)
-        tmp.connect('tcp://localhost:%d' % self.port)
-        tmp.send_multipart([b'', ServerCommand.terminate])
-        tmp.close()
-
-    def start(self):
+    def run(self):
+        self.prepare()
         available_gpus = range(self.num_worker)
         run_on_gpu = True
         num_req = 0
