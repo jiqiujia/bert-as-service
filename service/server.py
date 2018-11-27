@@ -151,12 +151,6 @@ class BertServer(threading.Thread):
                         self.backend.send_multipart([client, msg])
         except zmq.error.ContextTerminated:
             self.logger.error('context is closed!')
-        finally:
-            self.backend.close()
-            self.backend_pub.close()
-            self.sink.close()
-            self.frontend.close()
-            self.logger.info('main thread terminated!')
 
 
 class BertSink(Process):
