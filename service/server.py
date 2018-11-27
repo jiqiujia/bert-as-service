@@ -93,8 +93,8 @@ class BertServer(threading.Thread):
         self.sink.close()
         self.frontend.close()
         self.context.term()
-        self.logger.info('terminated!')
         self.join()
+        self.logger.info('terminated!')
 
     def run(self):
         available_gpus = range(self.num_worker)
