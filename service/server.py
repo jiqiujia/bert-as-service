@@ -161,7 +161,7 @@ class BertServer(threading.Thread):
         except zmq.error.ContextTerminated:
             self.logger.error('context is closed!')
         finally:
-            pass
+            self.logger.info('stop listening')
 
 
 class BertSink(Process):
