@@ -155,6 +155,7 @@ class BertServer(threading.Thread):
         finally:
             self.frontend.close()
             self.backend.close()
+            self.backend_pub.close()
             self.sink.close()
             self.context.term()
             self.logger.info('terminated!')
@@ -307,11 +308,11 @@ class BertWorker(Process):
             while True:
                 socks = dict(poller.poll())
                 if socks.get(frontend) == zmq.POLLIN:
-                    client_id, msg = poller.recv_multipart()
+                    client_id, msg = frontend.recv_multipart()
                     if msg == ServerCommand.terminate:
                         raise StopIteration
                 if socks.get(receiver) == zmq.POLLIN:
-                    client_id, msg = poller.recv_multipart()
+                    client_id, msg = receiver.recv_multipart()
                     msg = jsonapi.loads(msg)
                     self.logger.info('new job %s, size: %d' % (client_id, len(msg)))
                     if BertClient.is_valid_input(msg):
