@@ -169,7 +169,6 @@ class BertSink(Process):
         self.front_sink_addr = front_sink_addr
 
     def close(self):
-        self.join()
         self.terminate()
         self.logger.info('terminated!')
 
@@ -275,7 +274,6 @@ class BertWorker(Process):
         self.front_address = frontend_address
 
     def close(self):
-        self.join()
         self.terminate()
         self.logger.info('terminated!')
 
