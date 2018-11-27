@@ -44,7 +44,7 @@ class BenchmarkClient(threading.Thread):
 if __name__ == '__main__':
     common = {
         'model_dir': '/data/cips/data/lab/data/model/chinese_L-12_H-768_A-12',
-        'num_worker': 2,
+        'num_worker': 8,
         'num_repeat': 5,
         'port': PORT,
         'port_out': PORT_OUT,
@@ -62,7 +62,7 @@ if __name__ == '__main__':
         'num_client': [2, 4, 8, 16, 32],
     }
 
-    fp = open('benchmark.result', 'w')
+    fp = open('benchmark-%d.result' % common['num_worker'], 'w')
     for var_name, var_lst in experiments.items():
         # set common args
         args = namedtuple('args_namedtuple', ','.join(common.keys()))
