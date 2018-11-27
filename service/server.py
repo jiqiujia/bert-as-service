@@ -88,13 +88,7 @@ class BertServer(threading.Thread):
         tmp.connect('tcp://localhost:%d' % self.port)
         tmp.send_multipart([b'', ServerCommand.terminate])
         tmp.close()
-        self.backend.close()
-        self.backend_pub.close()
-        self.sink.close()
-        self.frontend.close()
-        self.context.term()
         self.join()
-        self.logger.info('terminated!')
 
     def run(self):
         available_gpus = range(self.num_worker)
@@ -161,7 +155,13 @@ class BertServer(threading.Thread):
         except zmq.error.ContextTerminated:
             self.logger.error('context is closed!')
         finally:
-            self.logger.info('stop listening')
+            self.frontend.setsockopt(zmq.LINGER, 0)
+            self.backend.close()
+            self.backend_pub.close()
+            self.sink.close()
+            self.frontend.close()
+            self.context.term()
+            self.logger.info('terminated!')
 
 
 class BertSink(Process):
