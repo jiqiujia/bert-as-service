@@ -57,7 +57,6 @@ class BertServer:
         # frontend facing client
         self.frontend = self.context.socket(zmq.PULL)
         self.frontend.bind('tcp://*:%d' % self.port)
-        self.frontend.setsockopt(zmq.LINGER, 0)
 
         # pair connection between frontend and sink
         self.sink = self.context.socket(zmq.PAIR)
