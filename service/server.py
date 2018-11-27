@@ -59,6 +59,7 @@ class BertServer(threading.Thread):
         # frontend facing client
         self.frontend = self.context.socket(zmq.PULL)
         self.frontend.bind('tcp://*:%d' % self.port)
+        self.frontend.setsockopt(zmq.LINGER, 0)
 
         # pair connection between frontend and sink
         self.sink = self.context.socket(zmq.PAIR)
@@ -155,7 +156,6 @@ class BertServer(threading.Thread):
         except zmq.error.ContextTerminated:
             self.logger.error('context is closed!')
         finally:
-            self.frontend.setsockopt(zmq.LINGER, 0)
             self.backend.close()
             self.backend_pub.close()
             self.sink.close()
