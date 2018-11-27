@@ -82,11 +82,10 @@ class BertServer(threading.Thread):
 
     def close(self):
         self.logger.info('shutting down...')
+        msg = ServerCommand.terminate
+        self.sink.send_multipart([b'', msg, b''])
+        self.backend_pub.send_multipart([b'', msg])
         # send signal to frontend
-        tmp = self.context.socket(zmq.PUSH)
-        tmp.connect('tcp://localhost:%d' % self.port)
-        tmp.send_multipart([b'', ServerCommand.terminate])
-        tmp.close()
         self.join()
         self.context.term()
         self.logger.info('all terminated!')
@@ -127,8 +126,6 @@ class BertServer(threading.Thread):
                                                              **self.args_dict})])
                     continue
                 elif msg == ServerCommand.terminate:
-                    self.sink.send_multipart([client, msg, b''])
-                    self.backend_pub.send_multipart([client, msg])
                     self.logger.info('termination initialized!')
                     break
                 else:
