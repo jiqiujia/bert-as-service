@@ -70,6 +70,10 @@ class BertServer(threading.Thread):
         self.backend.bind('ipc://*')
         self.addr_backend = self.backend.getsockopt(zmq.LAST_ENDPOINT).decode('ascii')
 
+        self.backend_pub = self.context.socket(zmq.PUB)
+        self.backend_pub.bind('ipc://*')
+        self.addr_backend_pub = self.backend_pub.getsockopt(zmq.LAST_ENDPOINT).decode('ascii')
+
         # start the sink thread
         proc_sink = BertSink(self.args, self.addr_front2sink)
         proc_sink.start()
@@ -84,9 +88,6 @@ class BertServer(threading.Thread):
         tmp.connect('tcp://localhost:%d' % self.port)
         tmp.send_multipart([b'', ServerCommand.terminate])
         tmp.close()
-        # tell all workers to close
-        for p in self.processes:
-            p.close()
 
     def run(self):
         available_gpus = range(self.num_worker)
@@ -104,7 +105,7 @@ class BertServer(threading.Thread):
 
         # start the backend processes
         for i in available_gpus:
-            process = BertWorker(i, self.args, self.addr_backend, self.addr_sink)
+            process = BertWorker(i, self.args, self.addr_backend, self.addr_sink, self.addr_backend_pub)
             self.processes.append(process)
             process.start()
 
@@ -122,30 +123,33 @@ class BertServer(threading.Thread):
                                                                 'run_on_gpu': run_on_gpu,
                                                                 'num_request': num_req},
                                                              **self.args_dict})])
+                    continue
                 elif msg == ServerCommand.terminate:
                     self.sink.send_multipart([client, msg, b''])
+                    self.backend_pub.send_multipart([client, msg])
                     self.logger.info('termination initialized!')
                     break
-
-                num_req += 1
-                client = client + b'#' + str(uuid.uuid4()).encode('ascii')
-                seqs = jsonapi.loads(msg)
-                num_seqs = len(seqs)
-                # tell sink to collect a new job
-                self.sink.send_multipart([client, b'REGISTER', b'%d' % num_seqs])
-
-                if num_seqs > self.max_batch_size:
-                    # divide the large batch into small batches
-                    s_idx = 0
-                    while s_idx < num_seqs:
-                        tmp = seqs[s_idx: (s_idx + self.max_batch_size)]
-                        if tmp:
-                            # get the worker with minimum workload
-                            client_partial_id = client + b'@%d' % s_idx
-                            self.backend.send_multipart([client_partial_id, jsonapi.dumps(tmp)])
-                        s_idx += len(tmp)
                 else:
-                    self.backend.send_multipart([client, msg])
+                    # receive actual text data
+                    num_req += 1
+                    client = client + b'#' + str(uuid.uuid4()).encode('ascii')
+                    seqs = jsonapi.loads(msg)
+                    num_seqs = len(seqs)
+                    # tell sink to collect a new job
+                    self.sink.send_multipart([client, b'REGISTER', b'%d' % num_seqs])
+
+                    if num_seqs > self.max_batch_size:
+                        # divide the large batch into small batches
+                        s_idx = 0
+                        while s_idx < num_seqs:
+                            tmp = seqs[s_idx: (s_idx + self.max_batch_size)]
+                            if tmp:
+                                # get the worker with minimum workload
+                                client_partial_id = client + b'@%d' % s_idx
+                                self.backend.send_multipart([client_partial_id, jsonapi.dumps(tmp)])
+                            s_idx += len(tmp)
+                    else:
+                        self.backend.send_multipart([client, msg])
         except zmq.error.ContextTerminated:
             self.logger.error('context is closed!')
         finally:
@@ -164,10 +168,6 @@ class BertSink(Process):
         self.logger = set_logger('SINK')
         self.front_sink_addr = front_sink_addr
 
-    def close(self):
-        # sink is closed by receiving terminate signal from frontend
-        pass
-
     def run(self):
         context = zmq.Context()
         # receive from workers
@@ -181,16 +181,16 @@ class BertSink(Process):
         sender = context.socket(zmq.PUB)
         sender.bind('tcp://*:%d' % self.port)
 
-        pending_checksum = defaultdict(int)
-        pending_result = defaultdict(list)
-        job_checksum = {}
-
         poller = zmq.Poller()
         poller.register(frontend, zmq.POLLIN)
         poller.register(receiver, zmq.POLLIN)
 
         # send worker receiver address back to frontend
         frontend.send(receiver.getsockopt(zmq.LAST_ENDPOINT))
+
+        pending_checksum = defaultdict(int)
+        pending_result = defaultdict(list)
+        job_checksum = {}
 
         try:
             while True:
@@ -246,7 +246,7 @@ class BertSink(Process):
 
 
 class BertWorker(Process):
-    def __init__(self, id, args, worker_address, sink_address):
+    def __init__(self, id, args, worker_address, sink_address, frontend_address):
         super().__init__()
         self.model_dir = args.model_dir
         self.config_fp = os.path.join(self.model_dir, 'bert_config.json')
@@ -267,11 +267,7 @@ class BertWorker(Process):
         self.logger = set_logger('WORKER-%d' % self.worker_id)
         self.worker_address = worker_address
         self.sink_address = sink_address
-
-    def close(self):
-        self.logger.info('shutting down...')
-        self.terminate()
-        self.join()
+        self.front_address = frontend_address
 
     def run(self):
         context = zmq.Context()
@@ -281,7 +277,14 @@ class BertWorker(Process):
         sink = context.socket(zmq.PUSH)
         sink.connect(self.sink_address)
 
-        input_fn = self.input_fn_builder(receiver)
+        frontend = context.socket(zmq.SUB)
+        frontend.connect(self.front_address)
+
+        poller = zmq.Poller()
+        poller.register(frontend, zmq.POLLIN)
+        poller.register(receiver, zmq.POLLIN)
+
+        input_fn = self.input_fn_builder(poller, frontend, receiver)
 
         self.logger.info('ready and listening')
         start_t = time.perf_counter()
@@ -295,26 +298,32 @@ class BertWorker(Process):
 
         receiver.close()
         sink.close()
+        frontend.close()
         context.term()
         self.logger.info('terminated!')
 
-    def input_fn_builder(self, worker):
+    def input_fn_builder(self, poller, frontend, receiver):
         def gen():
             while True:
-                client_id, msg = worker.recv_multipart()
-                msg = jsonapi.loads(msg)
-                self.logger.info('new job %s, size: %d' % (client_id, len(msg)))
-                if BertClient.is_valid_input(msg):
-                    tmp_f = list(convert_lst_to_features(msg, self.max_seq_len, self.tokenizer))
-                    yield {
-                        'client_id': client_id,
-                        'input_ids': [f.input_ids for f in tmp_f],
-                        'input_mask': [f.input_mask for f in tmp_f],
-                        'input_type_ids': [f.input_type_ids for f in tmp_f]
-                    }
-                else:
-                    self.logger.warning('unsupported type of job %s! sending back None' % client_id)
-                    worker.send_multipart([client_id, b'', b''])
+                socks = dict(poller.poll())
+                if socks.get(frontend) == zmq.POLLIN:
+                    client_id, msg = poller.recv_multipart()
+                    if msg == ServerCommand.terminate:
+                        raise StopIteration
+                if socks.get(receiver) == zmq.POLLIN:
+                    client_id, msg = poller.recv_multipart()
+                    msg = jsonapi.loads(msg)
+                    self.logger.info('new job %s, size: %d' % (client_id, len(msg)))
+                    if BertClient.is_valid_input(msg):
+                        tmp_f = list(convert_lst_to_features(msg, self.max_seq_len, self.tokenizer))
+                        yield {
+                            'client_id': client_id,
+                            'input_ids': [f.input_ids for f in tmp_f],
+                            'input_mask': [f.input_mask for f in tmp_f],
+                            'input_type_ids': [f.input_type_ids for f in tmp_f]
+                        }
+                    else:
+                        self.logger.error('unsupported type of job %s!' % client_id)
 
         def input_fn():
             return (tf.data.Dataset.from_generator(
