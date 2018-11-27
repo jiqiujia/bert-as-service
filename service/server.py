@@ -87,11 +87,9 @@ class BertServer(threading.Thread):
         tmp.connect('tcp://localhost:%d' % self.port)
         tmp.send_multipart([b'', ServerCommand.terminate])
         tmp.close()
-        self.frontend.close()
-        self.backend.close()
-        self.sink.close()
+        self.join()
         self.context.term()
-        self.logger.info('terminated!')
+        self.logger.info('all terminated!')
 
     def run(self):
         available_gpus = range(self.num_worker)
@@ -132,7 +130,6 @@ class BertServer(threading.Thread):
                     self.sink.send_multipart([client, msg, b''])
                     self.backend_pub.send_multipart([client, msg])
                     self.logger.info('termination initialized!')
-                    self.frontend.close()
                     break
                 else:
                     # receive actual text data
@@ -162,8 +159,7 @@ class BertServer(threading.Thread):
             self.backend_pub.close()
             self.sink.close()
             self.frontend.close()
-            self.context.term()
-            self.logger.info('terminated!')
+            self.logger.info('main thread terminated!')
 
 
 class BertSink(Process):
