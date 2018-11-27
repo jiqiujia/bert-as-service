@@ -129,6 +129,7 @@ class BertServer(threading.Thread):
                     self.sink.send_multipart([client, msg, b''])
                     self.backend_pub.send_multipart([client, msg])
                     self.logger.info('termination initialized!')
+                    self.frontend.close()
                     break
                 else:
                     # receive actual text data
